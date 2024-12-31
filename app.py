@@ -4,9 +4,17 @@ from functools import wraps
 from auth import APIKeyManager
 import requests
 from requests.auth import HTTPBasicAuth
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 api_key_manager = APIKeyManager()
+
+# Get environment variables
+TALENT_SUBDOMAIN = os.getenv('TALENT_SUBDOMAIN')
+TALENT_API_KEY = os.getenv('TALENT_API_KEY')
 
 def require_api_key(f):
     @wraps(f)
@@ -21,26 +29,26 @@ def require_api_key(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def fetch_instructor_led_training(subdomain, api_key, username, course_customfield):
+def fetch_instructor_led_training(student_id, batch_id, subdomain=TALENT_SUBDOMAIN, api_key=TALENT_API_KEY):
     """
-    Fetch 'Instructor-led training' units for a user in a course based on username and course custom field.
-    Stops execution and returns appropriate messages if the username, course_customfield, or API key is invalid.
+    Fetch 'Instructor-led training' units for a user in a course based on student_id and batch_id.
+    Stops execution and returns appropriate messages if the student_id, batch_id, or API key is invalid.
     
     :param subdomain: TalentLMS subdomain
     :param api_key: TalentLMS API key
-    :param username: Username of the user
-    :param course_customfield: Custom field value of the course
+    :param student_id: Student ID of the user
+    :param batch_id: Batch ID value of the course
     :return: List of units with type 'Instructor-led training' or error message
     """
     try:
         # Validate API Key and User Details
-        user_url = f"https://{subdomain}.talentlms.com/api/v1/users/username:{username}"
+        user_url = f"https://{subdomain}.talentlms.com/api/v1/users/username:{student_id}"
         user_response = requests.get(user_url, auth=HTTPBasicAuth(api_key, ''))
 
         if user_response.status_code == 401:
             return "Invalid API Key. Please provide a valid API Key."
         if user_response.status_code == 404:
-            return f"User with username '{username}' not found."
+            return f"User with student_id '{student_id}' not found."
         if user_response.status_code != 200:
             return f"Error fetching user details: {user_response.status_code}, {user_response.text}"
 
@@ -48,26 +56,26 @@ def fetch_instructor_led_training(subdomain, api_key, username, course_customfie
         user_id = user_data.get('id')
 
         if not user_id:
-            return "User ID not found for the provided username."
+            return "User ID not found for the provided student_id."
 
         # Validate Course Details
-        course_url = f"https://{subdomain}.talentlms.com/api/v1/getcoursesbycustomfield/custom_field_value:{course_customfield}"
+        course_url = f"https://{subdomain}.talentlms.com/api/v1/getcoursesbycustomfield/custom_field_value:{batch_id}"
         course_response = requests.get(course_url, auth=HTTPBasicAuth(api_key, ''))
 
         if course_response.status_code == 404:
-            return f"Course with custom field value '{course_customfield}' not found."
+            return f"Course with batch ID '{batch_id}' not found."
         if course_response.status_code != 200:
             return f"Error fetching course details: {course_response.status_code}, {course_response.text}"
 
         courses = course_response.json()
         if not courses:
-            return f"No courses found for the custom field value '{course_customfield}'."
+            return f"No courses found for the batch ID '{batch_id}'."
 
         # Assuming the first course is the one we want
         course_id = courses[0].get('id')
 
         if not course_id:
-            return "Course ID not found for the provided custom field value."
+            return "Course ID not found for the provided batch ID."
 
         # Get user status in course
         status_url = f"https://{subdomain}.talentlms.com/api/v1/getuserstatusincourse"
@@ -101,10 +109,8 @@ def home():
                 'method': 'GET',
                 'headers': ['X-API-Key'],
                 'params': [
-                    'subdomain',
-                    'talent_api_key',
-                    'username',
-                    'course_customfield'
+                    'student_id',
+                    'batch_id'
                 ]
             }
         }
@@ -124,45 +130,43 @@ def generate_key():
     })
 
 @app.route('/api/data', methods=['GET'])
-@require_api_key
 def get_data():
-    # Get and validate required parameters
-    subdomain = request.args.get('subdomain')
-    talent_api_key = request.args.get('talent_api_key')
-    username = request.args.get('username')
-    course_customfield = request.args.get('course_customfield')
+    # First validate API key
+    api_key = request.headers.get('X-API-Key')
+    if not api_key:
+        return jsonify({'error': 'No API key provided'}), 401
+    
+    # Get and validate customer_id
+    customer_id = api_key_manager.get_customer_id(api_key)
+    if not customer_id:
+        return jsonify({'error': 'Invalid API key'}), 401
+    
+    # Get required parameters
+    student_id = request.args.get('student_id')
+    batch_id = request.args.get('batch_id')
     
     # Validate required parameters
-    if not all([subdomain, talent_api_key, username, course_customfield]):
+    if not all([student_id, batch_id]):
         return jsonify({
             'error': 'Missing required parameters',
             'required_parameters': {
-                'subdomain': 'TalentLMS subdomain',
-                'talent_api_key': 'TalentLMS API key',
-                'username': 'Username to check',
-                'course_customfield': 'Course custom field value'
+                'student_id': 'Student ID to check',
+                'batch_id': 'Batch ID value'
             }
         }), 400
     
-    # Get customer_id for logging/tracking
-    api_key = request.headers.get('X-API-Key')
-    customer_id = api_key_manager.get_customer_id(api_key)
-    
-    # Fetch instructor-led training data
+    # Fetch instructor-led training data only if validation passed
     training_data = fetch_instructor_led_training(
-        subdomain=subdomain,
-        api_key=talent_api_key,
-        username=username,
-        course_customfield=course_customfield
+        student_id=student_id,
+        batch_id=batch_id
     )
     
     # Prepare response
     response = {
         'customer_id': customer_id,
         'request_parameters': {
-            'subdomain': subdomain,
-            'username': username,
-            'course_customfield': course_customfield
+            'student_id': student_id,
+            'batch_id': batch_id
         },
         'result': training_data
     }
