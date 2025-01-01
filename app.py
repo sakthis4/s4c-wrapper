@@ -87,11 +87,49 @@ def fetch_instructor_led_training(student_id, batch_id, subdomain=TALENT_SUBDOMA
 
         status_data = status_response.json()
         instructor_led_units = [
-            unit for unit in status_data.get('units', [])
+            {
+                'id': unit.get('id'),
+                'name': unit.get('name')
+            }
+            for unit in status_data.get('units', [])
             if unit.get('type') == 'Instructor-led training'
         ]
 
         return instructor_led_units if instructor_led_units else "No 'Instructor-led training' units found."
+
+    except requests.RequestException as e:
+        return f"An error occurred: {str(e)}"
+
+def get_ilt_sessions_by_id(subdomain, api_key, ilt_id):
+    """
+    Fetch Instructor-Led Training (ILT) sessions by ILT ID.
+    """
+    try:
+        url = f"https://{subdomain}.talentlms.com/api/v1/getiltsessions"
+        params = {'ilt_id': ilt_id}
+        response = requests.get(url, params=params, auth=HTTPBasicAuth(api_key, ''))
+
+        if response.status_code == 401:
+            return "Invalid API Key. Please provide a valid API Key."
+        if response.status_code == 404:
+            return f"No ILT sessions found for ILT ID '{ilt_id}'."
+        if response.status_code != 200:
+            return f"Error fetching ILT sessions: {response.status_code}, {response.text}"
+
+        sessions = response.json()
+        if not sessions:
+            return f"No sessions available for ILT ID '{ilt_id}'."
+
+        # Extract only name and description from sessions
+        simplified_sessions = [
+            {
+                'name': session.get('name'),
+                'description': session.get('description')
+            }
+            for session in sessions
+        ]
+        
+        return simplified_sessions
 
     except requests.RequestException as e:
         return f"An error occurred: {str(e)}"
@@ -155,11 +193,25 @@ def get_data():
             }
         }), 400
     
-    # Fetch instructor-led training data only if validation passed
+    # Fetch instructor-led training data
     training_data = fetch_instructor_led_training(
         student_id=student_id,
         batch_id=batch_id
     )
+    
+    if isinstance(training_data, str):
+        return jsonify({'error': training_data}), 400
+
+    # Fetch ILT sessions for each training unit
+    sessions_data = []
+    for unit in training_data:
+        ilt_sessions = get_ilt_sessions_by_id(
+            subdomain=TALENT_SUBDOMAIN,
+            api_key=TALENT_API_KEY,
+            ilt_id=unit['id']
+        )
+        if not isinstance(ilt_sessions, str):  # if not an error message
+            sessions_data.extend(ilt_sessions)
     
     # Prepare response
     response = {
@@ -168,12 +220,8 @@ def get_data():
             'student_id': student_id,
             'batch_id': batch_id
         },
-        'result': training_data
+        'result': sessions_data if sessions_data else "No ILT sessions found"
     }
-    
-    # If training_data is an error message (string), return as error
-    if isinstance(training_data, str):
-        return jsonify({'error': training_data}), 400
     
     return jsonify(response)
 
