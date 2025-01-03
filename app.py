@@ -5,6 +5,7 @@ from auth import APIKeyManager
 import requests
 from requests.auth import HTTPBasicAuth
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
@@ -89,7 +90,8 @@ def fetch_instructor_led_training(student_id, batch_id, subdomain=TALENT_SUBDOMA
         instructor_led_units = [
             {
                 'id': unit.get('id'),
-                'name': unit.get('name')
+                'name': unit.get('name'),
+                'completion_status': unit.get('completion_status', 'Failed')
             }
             for unit in status_data.get('units', [])
             if unit.get('type') == 'Instructor-led training'
@@ -120,14 +122,65 @@ def get_ilt_sessions_by_id(subdomain, api_key, ilt_id):
         if not sessions:
             return f"No sessions available for ILT ID '{ilt_id}'."
 
-        # Extract only name and description from sessions
-        simplified_sessions = [
-            {
+        # Extract and compute session details
+        simplified_sessions = []
+        for session in sessions:
+            start_date = session.get('start_date')
+            print(f"Raw start_date: {start_date}")  # Debug raw start_date
+            print(f"Type of start_date: {type(start_date)}")  # Debug type of start_date
+            
+            try:
+                duration = int(session.get('duration_minutes', '0'))
+                print(f"Duration minutes: {duration}")  # Debug duration
+            except (ValueError, TypeError):
+                duration = 0
+                print(f"Invalid duration value: {session.get('duration_minutes')}")
+            
+            end_date = None
+            if start_date:
+                try:
+                    date_formats = [
+                        "%d/%m/%Y, %H:%M:%S",
+                        "%Y-%m-%d %H:%M:%S",
+                        "%Y-%m-%d %H:%M",
+                        "%Y-%m-%dT%H:%M:%S",
+                        "%Y-%m-%dT%H:%M:%SZ",
+                        "%d/%m/%Y %H:%M",
+                        "%d-%m-%Y %H:%M",
+                        "%Y/%m/%d %H:%M"
+                    ]
+                    
+                    start_datetime = None
+                    for date_format in date_formats:
+                        try:
+                            print(f"Trying format: {date_format}")
+                            start_datetime = datetime.strptime(start_date, date_format)
+                            print(f"Success! Parsed start_datetime: {start_datetime}")
+                            break
+                        except ValueError as ve:
+                            print(f"Failed with format {date_format}: {str(ve)}")
+                            continue
+                    
+                    if start_datetime:
+                        end_datetime = start_datetime + timedelta(minutes=duration)
+                        print(f"Calculated end_datetime: {end_datetime}")
+                        end_date = end_datetime.strftime("%Y-%m-%d %H:%M:%S")
+                        print(f"Formatted end_date: {end_date}")
+                    else:
+                        print("Failed to parse date with any format")
+                except Exception as e:
+                    print(f"Error processing date: {start_date}, Error: {str(e)}")
+                    end_date = None
+            
+            session_data = {
                 'name': session.get('name'),
-                'description': session.get('description')
+                'description': session.get('description'),
+                'start_date': start_date,
+                'duration_minutes': duration,
+                'end_date': end_date
             }
-            for session in sessions
-        ]
+            print(f"Final session data: {session_data}")
+            simplified_sessions.append(session_data)
         
         return simplified_sessions
 
@@ -182,15 +235,25 @@ def get_data():
     # Get required parameters
     student_id = request.args.get('student_id')
     batch_id = request.args.get('batch_id')
+    filter_date = request.args.get('date')  # New date parameter
     
     # Validate required parameters
-    if not all([student_id, batch_id]):
+    if not all([student_id, batch_id, filter_date]):
         return jsonify({
             'error': 'Missing required parameters',
             'required_parameters': {
                 'student_id': 'Student ID to check',
-                'batch_id': 'Batch ID value'
+                'batch_id': 'Batch ID value',
+                'date': 'Date in YYYY-MM-DD format'
             }
+        }), 400
+    
+    # Validate date format
+    try:
+        filter_datetime = datetime.strptime(filter_date, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({
+            'error': 'Invalid date format. Please use YYYY-MM-DD format'
         }), 400
     
     # Fetch instructor-led training data
@@ -202,7 +265,7 @@ def get_data():
     if isinstance(training_data, str):
         return jsonify({'error': training_data}), 400
 
-    # Fetch ILT sessions for each training unit
+    # Fetch ILT sessions for each training unit and filter by date
     sessions_data = []
     for unit in training_data:
         ilt_sessions = get_ilt_sessions_by_id(
@@ -210,17 +273,37 @@ def get_data():
             api_key=TALENT_API_KEY,
             ilt_id=unit['id']
         )
-        if not isinstance(ilt_sessions, str):  # if not an error message
-            sessions_data.extend(ilt_sessions)
+        if not isinstance(ilt_sessions, str):
+            # Filter sessions for the specified date
+            filtered_sessions = []
+            for session in ilt_sessions:
+                session_date = datetime.strptime(
+                    session['start_date'].split(',')[0],  # Get date part only
+                    '%d/%m/%Y'
+                ).date()
+                if session_date == filter_datetime.date():
+                    completion_status = unit.get('completion_status', 'Failed')
+                    # Set attendance based on completion_status
+                    session['attendance'] = "Passed" if completion_status == "Completed" else "Failed"
+                    
+                    # Set values to null/0 if attendance is Failed
+                    if session['attendance'] == "Failed":
+                        session['duration_minutes'] = 0
+                        session['start_date'] = None
+                        session['end_date'] = None
+                    
+                    filtered_sessions.append(session)
+            sessions_data.extend(filtered_sessions)
     
     # Prepare response
     response = {
         'customer_id': customer_id,
         'request_parameters': {
             'student_id': student_id,
-            'batch_id': batch_id
+            'batch_id': batch_id,
+            'date': filter_date
         },
-        'result': sessions_data if sessions_data else "No ILT sessions found"
+        'result': sessions_data if sessions_data else f"No ILT sessions found for date {filter_date}"
     }
     
     return jsonify(response)
