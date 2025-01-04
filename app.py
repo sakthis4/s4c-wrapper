@@ -172,12 +172,13 @@ def home():
                 'method': 'GET',
                 'params': ['customer_id']
             },
-            '/api/data': {
+            '/api/attendance/daily': {
                 'method': 'GET',
                 'headers': ['X-API-Key'],
                 'params': [
-                    'student_id',
-                    'batch_id'
+                    'org_emp_code',
+                    'batch_id',
+                    'attendanceDate'
                 ]
             }
         }
@@ -196,7 +197,7 @@ def generate_key():
         'api_key': api_key
     })
 
-@app.route('/api/data', methods=['GET'])
+@app.route('/api/attendance/daily', methods=['GET'])
 def get_data():
     # First validate API key
     api_key = request.headers.get('X-API-Key')
@@ -209,18 +210,18 @@ def get_data():
         return jsonify({'error': 'Invalid API key'}), 401
     
     # Get required parameters
-    student_id = request.args.get('student_id')
+    student_id = request.args.get('org_emp_code')
     batch_id = request.args.get('batch_id')
-    filter_date = request.args.get('date')  # New date parameter
+    filter_date = request.args.get('attendanceDate')
     
     # Validate required parameters
     if not all([student_id, batch_id, filter_date]):
         return jsonify({
             'error': 'Missing required parameters',
             'required_parameters': {
-                'student_id': 'Student ID to check',
+                'org_emp_code': 'Student ID to check',
                 'batch_id': 'Batch ID value',
-                'date': 'Date in YYYY-MM-DD format'
+                'attendanceDate': 'Date in YYYY-MM-DD format'
             }
         }), 400
     
@@ -264,6 +265,7 @@ def get_data():
                         completion_status = unit.get('completion_status', 'Failed')
                         # Create new ordered dictionary with desired sequence
                         ordered_session = {
+                            'org_emp_code': student_id,
                             'attendance': "Passed" if completion_status == "Completed" else "Failed",
                             'session_name': session['session_name'],
                             'session_description': session['session_description'],
@@ -286,13 +288,13 @@ def get_data():
     
     # Prepare response
     response = {
-        'customer_id': customer_id,
+        #'customer_id': customer_id,
         'request_parameters': {
-            'student_id': student_id,
+            'org_emp_code': student_id,
             'batch_id': batch_id,
-            'date': filter_date
+            'attendanceDate': filter_date
         },
-        'result': sessions_data if sessions_data else f"No ILT sessions found for date {filter_date}"
+        'Successattendance': sessions_data if sessions_data else f"No ILT sessions found for date {filter_date}"
     }
     
     return jsonify(response)
