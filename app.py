@@ -139,19 +139,19 @@ def get_ilt_sessions_by_id(subdomain, api_key, ilt_id):
                     # Parse the input date
                     start_datetime = datetime.strptime(start_date, "%d/%m/%Y, %H:%M:%S")
                     
-                    # Format dates in consistent format
-                    formatted_start_date = start_datetime.strftime("%Y-%m-%dT%H:%M:%S")
+                    # Format dates in dd-MM-yyyy HH:mm:ss format
+                    formatted_start_date = start_datetime.strftime("%d-%m-%Y %H:%M:%S")
                     end_datetime = start_datetime + timedelta(minutes=duration)
-                    end_date = end_datetime.strftime("%Y-%m-%dT%H:%M:%S")
+                    end_date = end_datetime.strftime("%d-%m-%Y %H:%M:%S")
                 except Exception as e:
                     print(f"Error processing date: {start_date}, Error: {str(e)}")
                     formatted_start_date = None
                     end_date = None
             
             session_data = {
-                'attendance': None,  # Will be set in get_data function
-                'name': session.get('name'),
-                'description': session.get('description'),
+                'attendance': None,
+                'session_name': session.get('name'),
+                'session_description': session.get('description'),
                 'start_date': formatted_start_date,
                 'end_date': end_date,
                 'duration_minutes': duration
@@ -257,7 +257,7 @@ def get_data():
                     # Parse the session date using the new format
                     session_date = datetime.strptime(
                         session['start_date'],
-                        "%Y-%m-%dT%H:%M:%S"
+                        "%d-%m-%Y %H:%M:%S"
                     ).date()
                     
                     if session_date == filter_datetime.date():
@@ -265,18 +265,18 @@ def get_data():
                         # Create new ordered dictionary with desired sequence
                         ordered_session = {
                             'attendance': "Passed" if completion_status == "Completed" else "Failed",
-                            'session_name': session['name'],
-                            'session_description': session['description'],
-                            'start_date': session['start_date'],
-                            'end_date': session['end_date'],
+                            'session_name': session['session_name'],
+                            'session_description': session['session_description'],
+                            'in_time': session['start_date'],
+                            'out_time': session['end_date'],
                             'duration_minutes': session['duration_minutes']
                         }
                         
                         # Set values to null/0 if attendance is Failed
                         if ordered_session['attendance'] == "Failed":
                             ordered_session['duration_minutes'] = 0
-                            ordered_session['start_date'] = None
-                            ordered_session['end_date'] = None
+                            ordered_session['in_time'] = None
+                            ordered_session['out_time'] = None
                         
                         filtered_sessions.append(ordered_session)
                 except (ValueError, TypeError, KeyError):
