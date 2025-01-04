@@ -126,60 +126,36 @@ def get_ilt_sessions_by_id(subdomain, api_key, ilt_id):
         simplified_sessions = []
         for session in sessions:
             start_date = session.get('start_date')
-            print(f"Raw start_date: {start_date}")  # Debug raw start_date
-            print(f"Type of start_date: {type(start_date)}")  # Debug type of start_date
             
             try:
                 duration = int(session.get('duration_minutes', '0'))
-                print(f"Duration minutes: {duration}")  # Debug duration
             except (ValueError, TypeError):
                 duration = 0
-                print(f"Invalid duration value: {session.get('duration_minutes')}")
             
             end_date = None
+            formatted_start_date = None
             if start_date:
                 try:
-                    date_formats = [
-                        "%d/%m/%Y, %H:%M:%S",
-                        "%Y-%m-%d %H:%M:%S",
-                        "%Y-%m-%d %H:%M",
-                        "%Y-%m-%dT%H:%M:%S",
-                        "%Y-%m-%dT%H:%M:%SZ",
-                        "%d/%m/%Y %H:%M",
-                        "%d-%m-%Y %H:%M",
-                        "%Y/%m/%d %H:%M"
-                    ]
+                    # Parse the input date
+                    start_datetime = datetime.strptime(start_date, "%d/%m/%Y, %H:%M:%S")
                     
-                    start_datetime = None
-                    for date_format in date_formats:
-                        try:
-                            print(f"Trying format: {date_format}")
-                            start_datetime = datetime.strptime(start_date, date_format)
-                            print(f"Success! Parsed start_datetime: {start_datetime}")
-                            break
-                        except ValueError as ve:
-                            print(f"Failed with format {date_format}: {str(ve)}")
-                            continue
-                    
-                    if start_datetime:
-                        end_datetime = start_datetime + timedelta(minutes=duration)
-                        print(f"Calculated end_datetime: {end_datetime}")
-                        end_date = end_datetime.strftime("%Y-%m-%d %H:%M:%S")
-                        print(f"Formatted end_date: {end_date}")
-                    else:
-                        print("Failed to parse date with any format")
+                    # Format dates in consistent format
+                    formatted_start_date = start_datetime.strftime("%Y-%m-%dT%H:%M:%S")
+                    end_datetime = start_datetime + timedelta(minutes=duration)
+                    end_date = end_datetime.strftime("%Y-%m-%dT%H:%M:%S")
                 except Exception as e:
                     print(f"Error processing date: {start_date}, Error: {str(e)}")
+                    formatted_start_date = None
                     end_date = None
             
             session_data = {
+                'attendance': None,  # Will be set in get_data function
                 'name': session.get('name'),
                 'description': session.get('description'),
-                'start_date': start_date,
-                'duration_minutes': duration,
-                'end_date': end_date
+                'start_date': formatted_start_date,
+                'end_date': end_date,
+                'duration_minutes': duration
             }
-            print(f"Final session data: {session_data}")
             simplified_sessions.append(session_data)
         
         return simplified_sessions
@@ -277,22 +253,35 @@ def get_data():
             # Filter sessions for the specified date
             filtered_sessions = []
             for session in ilt_sessions:
-                session_date = datetime.strptime(
-                    session['start_date'].split(',')[0],  # Get date part only
-                    '%d/%m/%Y'
-                ).date()
-                if session_date == filter_datetime.date():
-                    completion_status = unit.get('completion_status', 'Failed')
-                    # Set attendance based on completion_status
-                    session['attendance'] = "Passed" if completion_status == "Completed" else "Failed"
+                try:
+                    # Parse the session date using the new format
+                    session_date = datetime.strptime(
+                        session['start_date'],
+                        "%Y-%m-%dT%H:%M:%S"
+                    ).date()
                     
-                    # Set values to null/0 if attendance is Failed
-                    if session['attendance'] == "Failed":
-                        session['duration_minutes'] = 0
-                        session['start_date'] = None
-                        session['end_date'] = None
-                    
-                    filtered_sessions.append(session)
+                    if session_date == filter_datetime.date():
+                        completion_status = unit.get('completion_status', 'Failed')
+                        # Create new ordered dictionary with desired sequence
+                        ordered_session = {
+                            'attendance': "Passed" if completion_status == "Completed" else "Failed",
+                            'session_name': session['name'],
+                            'session_description': session['description'],
+                            'start_date': session['start_date'],
+                            'end_date': session['end_date'],
+                            'duration_minutes': session['duration_minutes']
+                        }
+                        
+                        # Set values to null/0 if attendance is Failed
+                        if ordered_session['attendance'] == "Failed":
+                            ordered_session['duration_minutes'] = 0
+                            ordered_session['start_date'] = None
+                            ordered_session['end_date'] = None
+                        
+                        filtered_sessions.append(ordered_session)
+                except (ValueError, TypeError, KeyError):
+                    # Skip sessions with invalid dates
+                    continue
             sessions_data.extend(filtered_sessions)
     
     # Prepare response
