@@ -91,7 +91,8 @@ def fetch_instructor_led_training(student_id, batch_id, subdomain=TALENT_SUBDOMA
             {
                 'id': unit.get('id'),
                 'name': unit.get('name'),
-                'completion_status': unit.get('completion_status', 'Failed')
+                'completion_status': unit.get('completion_status', 'Failed'),
+                'score': unit.get('score', 0)
             }
             for unit in status_data.get('units', [])
             if unit.get('type') == 'Instructor-led training'
@@ -263,10 +264,18 @@ def get_data():
                     
                     if session_date == filter_datetime.date():
                         completion_status = unit.get('completion_status', 'Failed')
-                        # Create new ordered dictionary with desired sequence
+                        
+                        # Get and validate score
+                        try:
+                            score = float(unit.get('score', 0))  # Convert to float
+                        except (ValueError, TypeError):
+                            score = 0  # Default to 0 if conversion fails
+                            print(f"Invalid score value: {unit.get('score')}")
+                        
+                        # Update attendance logic to include score check
                         ordered_session = {
                             'org_emp_code': student_id,
-                            'attendance': "Passed" if completion_status == "Completed" else "Failed",
+                            'attendance': "Passed" if completion_status == "Completed" and score > 50 else "Failed",
                             'session_name': session['session_name'],
                             'session_description': session['session_description'],
                             'in_time': session['start_date'],
